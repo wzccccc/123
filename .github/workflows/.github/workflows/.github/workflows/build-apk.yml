@@ -1,0 +1,71 @@
+name: build-apk
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate project
+        id: loc
+        run: |
+          set -u
+          DIR=""
+          if [ -f app/build.gradle.kts ]; then
+            DIR=.
+          elif [ -f chaoxing-ai/app/build.gradle.kts ]; then
+            DIR=chaoxing-ai
+          else    
+          ARCH=""
+            for f in *.zip *.tar.gz *.tgz *.tar; do
+              [ -e "$f" ] || continue
+              ARCH="$f"
+              break
+            done
+            if [ -n "$ARCH" ]; then
+              mkdir -p src
+              case "$ARCH" in
+                *.zip) unzip -q "$ARCH" -d src ;;
+                *.tar.gz|*.tgz) tar -xzf "$ARCH" -C src ;;
+                *.tar) tar -xf "$ARCH" -C src ;;
+              esac
+              SUB=$(find src -maxdepth 3 -name settings.gradle.kts -printf '%h' 2>/dev/null | head -1)
+              [ -n "$SUB" ] && DIR="$SUB"
+            fi
+          fi
+          if [ -z "$DIR" ] || [ ! -f "$DIR/app/build.gradle.kts" ]; then
+            echo "::error::没找到 Gradle 工程"
+            exit 1
+          fi
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+      - name: Build release APK
+        working-directory: ${{ steps.loc.outputs.dir }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: cxai-free-apk
+          path: '**/app/build/outputs/apk/release/*.apk'
+          if-no-files-found: error
+          retention-days: 30
